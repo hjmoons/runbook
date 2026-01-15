@@ -1,0 +1,275 @@
+#!/bin/sh
+
+# Directory where Jenkins stores its configuration and workspaces
+JENKINS_HOME=../workspace
+
+# Location of the Jenkins WAR
+JENKINS_WAR=./jenkins.war
+
+# Location of the exploded WAR
+JENKINS_WEBROOT=../war
+
+# Location of the Jenkins log. By default, systemd-journald(8) is used.
+LOG_HOME=../log
+JENKINS_LOG=$LOG_HOME/jenkins.log
+
+# The Java home directory. When left empty, JENKINS_JAVA_CMD and PATH are consulted.
+#JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+
+# The Java executable. When left empty, JAVA_HOME and PATH are consulted.
+#JENKINS_JAVA_CMD=/etc/alternatives/java
+
+# Arguments for the Jenkins JVM
+JAVA_OPTS=-Djava.awt.headless=true
+
+# Unix Domain Socket to listen on for local HTTP requests. Default is disabled.
+#JENKINS_UNIX_DOMAIN_PATH=/run/jenkins/jenkins.socket
+
+# IP address to listen on for HTTP requests.
+# The default is to listen on all interfaces (0.0.0.0).
+#JENKINS_LISTEN_ADDRESS=
+
+# Port to listen on for HTTP requests. Set to -1 to disable.
+# To be able to listen on privileged ports (port numbers less than 1024),
+# add the CAP_NET_BIND_SERVICE capability to the AmbientCapabilities
+# directive below.
+JENKINS_PORT=8080
+
+# IP address to listen on for HTTPS requests. Default is disabled.
+#JENKINS_HTTPS_LISTEN_ADDRESS=
+
+# Port to listen on for HTTPS requests. Default is disabled.
+# To be able to listen on privileged ports (port numbers less than 1024),
+# add the CAP_NET_BIND_SERVICE capability to the AmbientCapabilities
+# directive below.
+#JENKINS_HTTPS_PORT=443
+
+# Path to the keystore in JKS format (as created by the JDK's keytool).
+# Default is disabled.
+#JENKINS_HTTPS_KEYSTORE=/path/to/keystore.jks
+
+# Password to access the keystore defined in JENKINS_HTTPS_KEYSTORE.
+# Default is disabled.
+#JENKINS_HTTPS_KEYSTORE_PASSWORD=s3cR3tPa55w0rD
+
+# IP address to listen on for HTTP2 requests. Default is disabled.
+#JENKINS_HTTP2_LISTEN_ADDRESS=
+
+# HTTP2 port to listen on. Default is disabled.
+# To be able to listen on privileged ports (port numbers less than 1024),
+# add the CAP_NET_BIND_SERVICE capability to the AmbientCapabilities
+# directive below.
+#JENKINS_HTTP2_PORT=
+
+# Controls which capabilities to include in the ambient capability set for the
+# executed process. Takes a whitespace-separated list of capability names, e.g.
+# CAP_SYS_ADMIN, CAP_DAC_OVERRIDE, CAP_SYS_PTRACE. Ambient capability sets are
+# useful if you want to execute a process as a non-privileged user but still
+# want to give it some capabilities. For example, add the CAP_NET_BIND_SERVICE
+# capability to be able to listen on privileged ports (port numbers less than
+# 1024).
+#AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+# Debug level for logs. The higher the value, the more verbose. 5 is INFO.
+#JENKINS_DEBUG_LEVEL=5
+
+# Set to true to enable logging to /var/log/jenkins/access_log.
+JENKINS_ENABLE_ACCESS_LOG=true
+
+# Servlet context (important if you want to use reverse proxying)
+#JENKINS_PREFIX=/jenkins
+
+# Arbitrary additional arguments to pass to Jenkins.
+# Full option list: java -jar jenkins.war --help
+#JENKINS_OPTS=
+
+# Maximum core file size. If unset, the value from the OS is inherited.
+#LimitCORE=infinity
+
+# Maximum file size. If unset, the value from the OS is inherited.
+#LimitFSIZE=infinity
+
+# File descriptor limit. If unset, the value from the OS is inherited.
+#LimitNOFILE=8192
+
+# Maximum number of processes. If unset, the value from the OS is inherited.
+#LimitNPROC=32768
+
+
+die() {
+        echo "$(basename "$0"): $*" >&2
+        exit 1
+}
+
+check_env() {
+        required=true
+        for var in "$@"; do
+                if [ "${var}" = '--' ]; then
+                        required=false
+                        continue
+                fi
+
+                val=$(eval echo "\$${var}")
+                if $required && [ -z "${val}" ]; then
+                        die "check_env: ${var} must be non-empty"
+                fi
+        done
+}
+
+infer_java_cmd() {
+        if [ -n "${JENKINS_JAVA_CMD}" ] && [ -x "${JENKINS_JAVA_CMD}" ]; then
+                return 0
+        fi
+
+        if [ -n "${JAVA_HOME}" ] && [ -x "${JAVA_HOME}/bin/java" ]; then
+                JENKINS_JAVA_CMD="${JAVA_HOME}/bin/java"
+                return 0
+        fi
+
+        JENKINS_JAVA_CMD="$(command -v java)" || return "$?"
+}
+
+infer_jenkins_opts() {
+        inferred_jenkins_opts=""
+
+        if [ -n "${JENKINS_WEBROOT}" ]; then
+                inferred_jenkins_opts="${inferred_jenkins_opts} --webroot='${JENKINS_WEBROOT}'"
+        fi
+
+        if [ -n "${JENKINS_LOG}" ]; then
+                inferred_jenkins_opts="${inferred_jenkins_opts} --logfile='${JENKINS_LOG}'"
+        fi
+
+        if [ -n "${JENKINS_PORT}" ]; then
+                inferred_jenkins_opts="${inferred_jenkins_opts} --httpPort=${JENKINS_PORT}"
+        fi
+
+        if [ -n "${JENKINS_LISTEN_ADDRESS}" ]; then
+                inferred_jenkins_opts="${inferred_jenkins_opts} --httpListenAddress=${JENKINS_LISTEN_ADDRESS}"
+        fi
+
+        if [ -n "${JENKINS_UNIX_DOMAIN_PATH}" ]; then
+                inferred_jenkins_opts="${inferred_jenkins_opts} --httpUnixDomainPath=${JENKINS_UNIX_DOMAIN_PATH}"
+        fi
+
+        if [ -n "${JENKINS_HTTPS_PORT}" ]; then
+                inferred_jenkins_opts="${inferred_jenkins_opts} --httpsPort=${JENKINS_HTTPS_PORT}"
+        fi
+
+        if [ -n "${JENKINS_HTTPS_LISTEN_ADDRESS}" ]; then
+                inferred_jenkins_opts="${inferred_jenkins_opts} --httpsListenAddress=${JENKINS_HTTPS_LISTEN_ADDRESS}"
+        fi
+
+        if [ -n "${JENKINS_HTTPS_KEYSTORE}" ]; then
+                inferred_jenkins_opts="${inferred_jenkins_opts} --httpsKeyStore='${JENKINS_HTTPS_KEYSTORE}'"
+        fi
+
+        if [ -n "${JENKINS_HTTPS_KEYSTORE_PASSWORD}" ]; then
+                inferred_jenkins_opts="${inferred_jenkins_opts} --httpsKeyStorePassword='${JENKINS_HTTPS_KEYSTORE_PASSWORD}'"
+        fi
+
+        if [ -n "${JENKINS_HTTP2_PORT}" ]; then
+                inferred_jenkins_opts="${inferred_jenkins_opts} --http2Port=${JENKINS_HTTP2_PORT}"
+        fi
+
+        if [ -n "${JENKINS_HTTP2_LISTEN_ADDRESS}" ]; then
+                inferred_jenkins_opts="${inferred_jenkins_opts} --http2ListenAddress=${JENKINS_HTTP2_LISTEN_ADDRESS}"
+        fi
+
+        if [ -n "${JENKINS_DEBUG_LEVEL}" ] && [ "${JENKINS_DEBUG_LEVEL}" -ne 5 ]; then
+                inferred_jenkins_opts="${inferred_jenkins_opts} --debug=${JENKINS_DEBUG_LEVEL}"
+        fi
+
+        if [ -n "${JENKINS_PREFIX}" ]; then
+                inferred_jenkins_opts="${inferred_jenkins_opts} --prefix='${JENKINS_PREFIX}'"
+        fi
+
+        if [ -n "${JENKINS_OPTS}" ]; then
+                inferred_jenkins_opts="${inferred_jenkins_opts} ${JENKINS_OPTS}"
+        fi
+
+        if [ -n "${JENKINS_ENABLE_ACCESS_LOG}" ] && $JENKINS_ENABLE_ACCESS_LOG; then
+                inferred_jenkins_opts="${inferred_jenkins_opts} --accessLoggerClassName=winstone.accesslog.SimpleAccessLogger"
+                inferred_jenkins_opts="${inferred_jenkins_opts} --simpleAccessLogger.format=combined"
+                inferred_jenkins_opts="${inferred_jenkins_opts} --simpleAccessLogger.file='$LOG_HOME/access.log'"
+        fi
+}
+
+main() {
+        if [ -n "${JENKINS_HOME}" ]; then
+                [ -d "${JENKINS_HOME}" ] || die "${JENKINS_HOME} is not a directory"
+        fi
+        [ -f "${JENKINS_WAR}" ] || die "${JENKINS_WAR} is not a file"
+
+        infer_java_cmd || die 'failed to find a valid Java installation'
+
+        infer_jenkins_opts
+
+        java_opts_tmp="${JAVA_OPTS}"
+        unset JAVA_OPTS
+        unset JENKINS_DEBUG_LEVEL
+        unset JENKINS_ENABLE_ACCESS_LOG
+        unset JENKINS_HTTP2_LISTEN_ADDRESS
+        unset JENKINS_HTTP2_PORT
+        unset JENKINS_HTTPS_KEYSTORE
+        unset JENKINS_HTTPS_KEYSTORE_PASSWORD
+        unset JENKINS_HTTPS_LISTEN_ADDRESS
+        unset JENKINS_HTTPS_PORT
+        java_cmd="${JENKINS_JAVA_CMD}"
+        unset JENKINS_JAVA_CMD
+        unset JENKINS_UNIX_DOMAIN_PATH
+        unset JENKINS_LISTEN_ADDRESS
+        unset JENKINS_LOG
+        unset JENKINS_OPTS
+        unset JENKINS_PORT
+        unset JENKINS_PREFIX
+        jenkins_war_tmp="${JENKINS_WAR}"
+        unset JENKINS_WAR
+        unset JENKINS_WEBROOT
+        eval exec \
+                "${java_cmd}" \
+                ${java_opts_tmp} \
+                -jar "${jenkins_war_tmp}" \
+                ${inferred_jenkins_opts}
+}
+
+if [ -z "${JENKINS_OPTS}" ]; then
+        JENKINS_OPTS="$*"
+else
+        JENKINS_OPTS="${JENKINS_OPTS} $*"
+fi
+
+if [ -z "${JENKINS_WAR}" ]; then
+        JENKINS_WAR=/usr/share/java/jenkins.war
+fi
+
+if [ -n "${JENKINS_HOME}" ]; then
+        export JENKINS_HOME=$JENKINS_HOME
+fi
+
+check_env \
+        JENKINS_WAR \
+        -- \
+        JAVA_HOME \
+        JENKINS_DEBUG_LEVEL \
+        JENKINS_ENABLE_ACCESS_LOG \
+        JENKINS_HOME \
+        JENKINS_HTTP2_LISTEN_ADDRESS \
+        JENKINS_HTTP2_PORT \
+        JENKINS_HTTPS_KEYSTORE \
+        JENKINS_HTTPS_KEYSTORE_PASSWORD \
+        JENKINS_HTTPS_LISTEN_ADDRESS \
+        JAVA_OPTS \
+        JENKINS_HTTPS_PORT \
+        JENKINS_JAVA_CMD \
+        JENKINS_UNIX_DOMAIN_PATH \
+        JENKINS_LISTEN_ADDRESS \
+        JENKINS_LOG \
+        JENKINS_OPTS \
+        JENKINS_PORT \
+        JENKINS_PREFIX \
+        JENKINS_WEBROOT
+
+main
+
+exit 0

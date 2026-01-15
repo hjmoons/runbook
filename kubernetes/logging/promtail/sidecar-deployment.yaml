@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: logging-test
+  labels:
+    app: logging-test
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: logging-test
+  template:
+    metadata:
+      labels:
+        app: logging-test
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.22.1
+        args:
+          - nginx
+          - '-g'
+          - daemon off;
+        ports:
+        - containerPort: 80
+      - name: promtail
+        image: grafana/promtail:master
+        args:
+          - "-config.file=/etc/promtail/promtail.yaml"
+        volumeMounts:
+          - name: config
+            mountPath: /etc/promtail
+          - name: shared-logs
+            mountPath: /var/log/nginx
+      volumes:
+        - name: config
+          configMap:
+            name: promtail-sidecar
+        - name: share-logs
+          emptyDir: {}

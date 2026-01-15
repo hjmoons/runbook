@@ -1,0 +1,88 @@
+#!/bin/bash
+
+# Jenkins 관련 경로 설정
+JENKINS="./jenkins"
+LOG_DIR="../log"
+PID_FILE="$LOG_DIR/jenkins.pid"       # Jenkins PID 파일 경로
+
+# 기능별 함수 정의
+start() {
+    # Log_DIR 경로가 없을 경우 생성
+    if [ ! -d "$LOG_DIR" ]; then
+        mkdir $LOG_DIR
+    fi
+
+    # PID 파일 유무로 프로세스가 실행되었는지 확인
+    if [ -f "$PID_FILE" ]; then
+        # 프로세스 정상 동작 확인
+        if kill -0 $(cat "$PID_FILE") > /dev/null; then
+            echo "Jenkins가 이미 실행 중입니다."
+        else
+            echo "Jenkins가 정상 실행중이지 않습니다."
+            echo "$PID_FILE 파일 삭제 후 다시 실행해주세요."
+        fi
+    else
+        echo "Jenkins를 시작합니다..."
+        nohup $JENKINS > /dev/null 2>&1 &
+        if [ $? -eq 0 ]; then
+            pgrep -f $JENKINS > $PID_FILE
+            echo "Jenkins 시작 완료. (PID: $(cat $PID_FILE))"
+        else
+            echo "Jenkins 시작 실패."
+        fi
+    fi
+}
+
+stop() {
+    if [ -f "$PID_FILE" ]; then
+        echo "Jenkins를 중지합니다..."
+        kill -15 "$(cat $PID_FILE)"
+        if [ $? -eq 0 ]; then
+            rm -f "$PID_FILE"
+            echo "Jenkins 중지 완료."
+        else
+            echo "Jenkins 중지 실패."
+        fi
+    else
+        echo "Jenkins가 실행 중이지 않습니다."
+    fi
+}
+
+status_check() {
+    if [ -f "$PID_FILE" ]; then
+        if kill -0 $(cat "$PID_FILE") 2>/dev/null; then
+            echo "Jenkins가 실행 중입니다. (PID: $(cat $PID_FILE))"
+        else 
+            echo "Jenkins가 정상적으로 종료되지 않았습니다."
+            echo "stop 후 다시 실행해주세요"
+        fi
+    else
+        if kill -0 $(cat "$PID_FILE") 2>/dev/null; then
+            echo "프로세스 ID 파일이 없습니다."
+            echo "$PID_FILE 파일을 다시 생성해주세요."
+        else 
+            echo "Jenkins가 실행 중이지 않습니다."
+        fi
+    fi
+}
+
+# 스크립트 옵션 처리
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    status)
+        status_check
+        ;;
+    restart)
+        stop
+        start
+        ;;
+    *)
+        echo "사용법: $0 {start|stop|status|restart}"
+        exit 1
+        ;;
+esac
